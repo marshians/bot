@@ -1,12 +1,13 @@
 use futures::lock::Mutex;
 use std::convert::TryInto;
-use std::env;
 
 use interactions::{discord, pokemon, Interactions};
 
 #[macro_use]
 extern crate rocket;
+use clap::Parser;
 use rocket::{http::Status, response::status, serde::json::Json, State};
+use serde::{Deserialize, Serialize};
 use serde_json::from_slice;
 use sodiumoxide::crypto::sign;
 use sodiumoxide::crypto::sign::ed25519::{PublicKey, Signature};
@@ -124,28 +125,49 @@ pub fn decode_hex(s: &str) -> Result<Vec<u8>, std::num::ParseIntError> {
         .collect()
 }
 
-#[launch]
-async fn rocket() -> _ {
-    let i = Interactions::new(
-        &env::var("GUILD_ID").unwrap(),
-        &env::var("APPLICATION_ID").unwrap(),
-        &env::var("BOT_TOKEN").unwrap(),
-    );
+#[derive(Parser)]
+#[clap(version = "1.0", author = "Joshua Marsh <joshua@themarshians.com>")]
+struct Options {
+    /// The Discord Server ID.
+    #[clap(short, long, default_value = "config.yaml")]
+    pub config: String,
+}
 
-    let pub_key = env::var("PUBLIC_KEY").unwrap();
-    let pub_key = decode_hex(&pub_key).unwrap();
-    let pub_key = sodiumoxide::crypto::sign::ed25519::PublicKey::from_slice(&pub_key).unwrap();
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct Config {
+    guild_id: String,
+    application_id: String,
+    bot_token: String,
+    public_key: String,
+}
 
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Parse our arguments and read our config.
+    let opts = Options::parse();
+    let config = std::fs::read_to_string(&opts.config)?;
+    let config: Config = serde_yaml::from_str(&config)?;
+
+    // Setup the public key we'll use for checking signatures.
+    let pub_key = decode_hex(&config.public_key)?;
+    let pub_key = PublicKey::from_slice(&pub_key).unwrap();
+
+    // Setup our interactions.
+    let i = Interactions::new(&config.guild_id, &config.application_id, &config.bot_token);
+
+    // Setup out connection to the Pokemon API.
     let p = pokemon::PokeAPI::new().await;
 
     // Initialize commands.
-    i.update_commands().await.unwrap();
-
-    println!("{:?}", i.get_commands().await.unwrap());
+    i.update_commands().await?;
 
     rocket::build()
         .manage(Mutex::new(p))
         .manage(Mutex::new(pub_key))
         .manage(Mutex::new(i))
         .mount("/", routes![handler])
+        .launch()
+        .await?;
+
+    Ok(())
 }
