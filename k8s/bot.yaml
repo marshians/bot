@@ -1,0 +1,73 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: bot-marsh-gg
+  namespace: marshians
+spec:
+  secretName: bot-marsh-gg-tls
+  dnsNames:
+  - bot.marsh.gg
+  issuerRef:
+    name: lets-encrypt
+    kind: ClusterIssuer
+    group: cert-manager.io
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  namespace: marshians
+  name: ingress
+spec:
+  ingressClassName: public
+  rules:
+  - host: bot.marsh.gg
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service: 
+            name: bot
+            port: 
+              number: 8000
+  tls:
+  - hosts:
+    - bot.marsh.gg
+    secretName: bot-marsh-gg-tls
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bot
+  labels:
+    app: bot
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: bot
+  template:
+    metadata:
+      labels:
+        app: bot
+    spec:
+      containers:
+      - name: bot
+        image: cr.marsh.gg/marshians/bot:latest
+        ports:
+        - containerPort: 8000
+        envFrom:
+        - secretRef:
+            name: bot
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bot
+spec:
+  selector:
+    app: bot
+  ports:
+    - protocol: TCP
+      port: 8000
+      targetPort: 8000
